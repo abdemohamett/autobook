@@ -73,10 +73,10 @@ export function processRows(rows: Row[], benchmark: Benchmark | undefined): Row[
       if (index > 0 && currentHOC !== null) {
         if (row.fs !== undefined && row.fs !== null) {
           newRow.rl = currentHOC - row.fs;
-          // Calculate difference if closing BM value is provided
-          if (row.closingBMValue !== undefined) {
-            newRow.d = row.closingBMValue;
-            newRow.diff = newRow.d - (newRow.rl || 0);
+          const knownBMValue = row.closingBMValue ?? row.d;
+          if (knownBMValue !== undefined && knownBMValue !== null) {
+            newRow.d = knownBMValue;
+            newRow.diff = knownBMValue - (newRow.rl || 0);
           }
         }
       }

@@ -20,10 +20,10 @@ export default function ProjectPage() {
   const [cpBS, setCpBS] = useState('');
   const [cpLabel, setCpLabel] = useState('');
   const [patternText, setPatternText] = useState('3.5 LHS, CL, 3.5 RHS');
+  const [patternDialogOpen, setPatternDialogOpen] = useState(false);
   const [editingBMName, setEditingBMName] = useState(false);
   const [editingBMRL, setEditingBMRL] = useState(false);
   const [bmRLRawInput, setBmRLRawInput] = useState<string>('');
-  const [showClosingBM, setShowClosingBM] = useState(false);
   // Store raw input values for intermediate states like "0", ".", "0."
   const [rawInputs, setRawInputs] = useState<Record<string, string>>({});
 
@@ -69,6 +69,32 @@ export default function ProjectPage() {
       return updated;
     });
   }, [saveProjectDebounced]);
+
+  useEffect(() => {
+    if (!project) return;
+
+    const rows = project.rows;
+    const closingIndexes: number[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i]?.isClosingBM) closingIndexes.push(i);
+    }
+
+    const needsAdd = closingIndexes.length === 0;
+    const needsMove = closingIndexes.length > 0 && closingIndexes[closingIndexes.length - 1] !== rows.length - 1;
+    const needsDedup = closingIndexes.length > 1;
+    if (!needsAdd && !needsMove && !needsDedup) return;
+
+    const closingRow: Row = needsAdd
+      ? {
+        id: `close-bm-${Date.now()}`,
+        chainage: '',
+        isClosingBM: true,
+      }
+      : rows[closingIndexes[closingIndexes.length - 1]];
+
+    const nextRows = [...rows.filter((r) => !r.isClosingBM), closingRow];
+    updateProject({ rows: nextRows });
+  }, [project, updateProject]);
 
   const updateRow = useCallback((rowId: string, updates: Partial<Row>) => {
     setProject((prev) => {
@@ -210,13 +236,44 @@ export default function ProjectPage() {
       .filter((p) => p.length > 0);
     if (parsed.length === 0) return;
 
-    // Regenerate rows with new pattern; preserve BM row (index 0)
+    // Preserve existing readings while applying new chainage labels
     const regenerated = generateTableRows({
       ...project,
       pointPattern: parsed,
     });
-    const bmRow = project.rows[0] || regenerated[0];
-    const newRows = [bmRow, ...regenerated.slice(1)];
+
+    const existingRows = project.rows;
+    const bmRow = existingRows[0] || regenerated[0];
+    const closingRow = existingRows.find((r) => r.isClosingBM);
+
+    const existingMiddle = existingRows.slice(1).filter((r) => !r.isClosingBM);
+    const newPointRows = regenerated.slice(1);
+
+    let pointIndex = 0;
+    const nextMiddle: Row[] = existingMiddle.map((r) => {
+      if (r.isCP) return r;
+      const p = newPointRows[pointIndex];
+      if (!p) return r;
+      pointIndex += 1;
+      return {
+        ...r,
+        chainage: p.chainage,
+        chainageType: p.chainageType,
+      };
+    });
+
+    const appended: Row[] = [];
+    for (; pointIndex < newPointRows.length; pointIndex += 1) {
+      const p = newPointRows[pointIndex];
+      appended.push({
+        id: p.id,
+        chainage: p.chainage,
+        chainageType: p.chainageType,
+      });
+    }
+
+    const baseRows = [bmRow, ...nextMiddle, ...appended];
+    const newRows = closingRow ? [...baseRows.filter((r) => !r.isClosingBM), closingRow] : baseRows;
 
     const updatedProject = {
       ...project,
@@ -261,24 +318,14 @@ export default function ProjectPage() {
               </h1>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-4 ml-4">
             <Button
-              onClick={() => setShowClosingBM(true)}
-              variant="outline"
-              size="sm"
-              disabled={processedRows.some(r => r.isClosingBM)}
-              className="text-xs h-8"
+              type="button"
+              onClick={() => setPatternDialogOpen(true)}
+              className="h-8 px-3 text-xs"
+              variant="secondary"
             >
-              Close with BM
-            </Button>
-            <Button
-              onClick={() => setShowClosingBM(true)}
-              variant="outline"
-              size="sm"
-              disabled={processedRows.some(r => r.isClosingBM)}
-              className="text-xs h-8"
-            >
-              Close with BM
+              Pattern
             </Button>
             {editingField === 'date' ? (
               <Input
@@ -308,38 +355,63 @@ export default function ProjectPage() {
       </header>
 
       <main className="px-2 sm:px-4 py-4 sm:py-6">
+        {patternDialogOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center"
+            role="dialog"
+            aria-modal="true"
+          >
+            <button
+              type="button"
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setPatternDialogOpen(false)}
+              aria-label="Close"
+            />
+            <div className="relative w-[min(92vw,560px)] rounded-lg bg-white shadow-lg border border-gray-200 p-4">
+              {/* Points pattern editor */}
+              <div className="mb-3">
+                <div className="text-sm font-semibold text-gray-900">Points pattern</div>
+                <div className="text-xs text-gray-500">Comma separated</div>
+              </div>
+              <div className="space-y-2">
+                <Input
+                  type="text"
+                  value={patternText}
+                  onChange={(e) => setPatternText(e.target.value)}
+                  className="w-full h-10 text-xs sm:text-sm"
+                  placeholder="e.g. 4.0 LHS, 3.5 LHS, CL, 3.5 RHS, 4.0 RHS"
+                />
+                <p className="text-[11px] text-gray-500">
+                  Use “CL” for center (green), any labels for sides (e.g., “4.0 LHS”, “3.5 RHS”, “RD4B-14A”).
+                </p>
+              </div>
+              <div className="mt-4 flex gap-2 justify-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-9 px-3 text-xs"
+                  onClick={() => setPatternDialogOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => {
+                    handleApplyPattern();
+                    setPatternDialogOpen(false);
+                  }}
+                  className="h-9 px-3 text-xs"
+                >
+                  Apply pattern
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Save indicator */}
         <div className="mb-2 text-xs text-gray-400 text-right">
           Saved locally ✓
-        </div>
-
-        {/* Points pattern editor */}
-        <div className="mb-4 p-3 sm:p-4 border border-gray-200 rounded-lg bg-gray-50">
-          <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
-            <div className="flex-1 min-w-0">
-              <label className="block text-xs text-gray-600 mb-1">
-                Points pattern (comma separated)
-              </label>
-              <Input
-                type="text"
-                value={patternText}
-                onChange={(e) => setPatternText(e.target.value)}
-                className="w-full h-10 text-xs sm:text-sm"
-                placeholder="e.g. 4.0 LHS, 3.5 LHS, CL, 3.5 RHS, 4.0 RHS"
-              />
-              <p className="text-[11px] text-gray-500 mt-1">
-                Use “CL” for center (green), any labels for sides (e.g., “4.0 LHS”, “3.5 RHS”, “RD4B-14A”).
-              </p>
-            </div>
-            <Button
-              type="button"
-              onClick={handleApplyPattern}
-              className="h-10 px-3 text-sm whitespace-nowrap"
-              variant="secondary"
-            >
-              Apply pattern
-            </Button>
-          </div>
         </div>
 
         {/* Table - Mobile Optimized */}
@@ -365,12 +437,13 @@ export default function ProjectPage() {
                   const isFirstRow = index === 0;
                   const isCLRow = row.chainageType === 'CL';
                   const isRDRow = row.chainage?.startsWith('RD') || row.chainage?.includes('RD');
+                  const isClosingBMRow = row.isClosingBM === true;
 
                   return (
                     <tr
                       key={row.id}
                       className={`border-b border-gray-200 hover:bg-gray-50 ${
-                        isRDRow ? 'bg-red-50' : ''
+                        isRDRow ? 'bg-red-50' : isClosingBMRow ? 'bg-yellow-50' : ''
                       }`}
                     >
                       <td className="p-1 sm:p-2">
@@ -405,6 +478,7 @@ export default function ProjectPage() {
                                 updateInputValue(row.id, 'bs', val);
                               }
                             }}
+                            disabled={isClosingBMRow}
                             className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono whitespace-nowrap"
                             placeholder=""
                           />
@@ -421,6 +495,7 @@ export default function ProjectPage() {
                               if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                               updateInputValue(row.id, 'is', val);
                             }}
+                          disabled={isClosingBMRow}
                           className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono whitespace-nowrap"
                           placeholder=""
                         />
@@ -438,10 +513,12 @@ export default function ProjectPage() {
                                 if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                                 updateInputValue(row.id, 'fs', val);
                               }}
-                              className="flex-1 h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono whitespace-nowrap"
-                              placeholder=""
+                              className={`flex-1 h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] ${
+                                isClosingBMRow ? 'bg-yellow-50 border-yellow-300 focus:border-yellow-400' : 'bg-gray-50 border-gray-200 focus:border-gray-400'
+                              } placeholder:text-gray-400 focus:bg-white text-right font-mono whitespace-nowrap`}
+                              placeholder={isClosingBMRow ? 'Closing FS' : ''}
                             />
-                            {row.fs !== undefined && row.fs !== null && !isCPRow && (
+                            {row.fs !== undefined && row.fs !== null && !isCPRow && !isClosingBMRow && (
                               <Button
                                 type="button"
                                 variant="outline"
@@ -634,8 +711,10 @@ export default function ProjectPage() {
                             if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                             updateInputValue(row.id, 'd', val);
                           }}
-                          className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono whitespace-nowrap"
-                          placeholder=""
+                          className={`w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] ${
+                            isClosingBMRow ? 'bg-yellow-50 border-yellow-300 focus:border-yellow-400' : 'bg-gray-50 border-gray-200 focus:border-gray-400'
+                          } placeholder:text-gray-400 focus:bg-white text-right font-mono whitespace-nowrap`}
+                          placeholder={isClosingBMRow ? 'BM RL' : ''}
                         />
                       </td>
                       <td className="p-1 sm:p-2">
@@ -682,6 +761,14 @@ export default function ProjectPage() {
                               <span className="truncate">{project.benchmark?.name || 'BM Name'}</span>
                             </div>
                           )
+                        ) : isClosingBMRow ? (
+                          <Input
+                            type="text"
+                            value={row.chainage || ''}
+                            onChange={(e) => updateRow(row.id, { chainage: e.target.value })}
+                            className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-yellow-50 border-yellow-300 focus:bg-white"
+                            placeholder="Closing BM name"
+                          />
                         ) : isCPDataRow ? (
                           // CP row: Show CP label in red with delete (HOC shown in HOC column)
                           <div className="px-1 sm:px-2 py-1 h-10 sm:h-11 flex items-center justify-between gap-2">
