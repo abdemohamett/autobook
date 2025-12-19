@@ -353,48 +353,61 @@ export default function ProjectPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Orange Header Bar */}
-      <header className="sticky top-0 z-20 bg-orange-500 text-white px-4 py-3 no-print">
-        <div className="flex items-center justify-between">
-          <div className="flex-1">
-            {editingField === 'title' ? (
-              <Input
-                type="text"
-                value={project.title}
-                onChange={(e) => updateProject({ title: e.target.value })}
-                onBlur={() => setEditingField(null)}
-                className="text-base font-semibold bg-white text-gray-900"
-                autoFocus
-              />
-            ) : (
-              <h1
-                className="text-base font-semibold cursor-pointer"
-                onClick={() => setEditingField('title')}
-              >
-                {headerTitle}
-              </h1>
-            )}
+      <header className="sticky top-0 z-20 bg-white text-gray-900 border-b border-gray-200 px-3 sm:px-4 py-2 no-print">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-col gap-0.5">
+              {editingField === 'title' ? (
+                <Input
+                  type="text"
+                  value={project.title}
+                  onChange={(e) => updateProject({ title: e.target.value })}
+                  onBlur={() => setEditingField(null)}
+                  className="h-9 text-base font-semibold bg-gray-50 text-gray-900 border-gray-200"
+                  autoFocus
+                />
+              ) : (
+                <div className="flex items-center gap-2 min-w-0">
+                  <h1
+                    className="text-base font-semibold cursor-pointer truncate"
+                    onClick={() => setEditingField('title')}
+                    title={headerTitle}
+                  >
+                    {headerTitle}
+                  </h1>
+                  <span className="shrink-0 text-[11px] sm:text-xs font-semibold px-2 py-0.5 rounded-full bg-orange-100 text-orange-700 border border-orange-200">
+                    {project.layer?.toUpperCase()}
+                  </span>
+                </div>
+              )}
+
+              {editingField === 'date' ? (
+                <Input
+                  type="date"
+                  value={project.date}
+                  onChange={(e) => updateProject({ date: e.target.value })}
+                  onBlur={() => setEditingField(null)}
+                  className="h-8 text-xs sm:text-sm bg-gray-50 text-gray-900 border-gray-200"
+                  autoFocus
+                />
+              ) : (
+                <button
+                  type="button"
+                  className="text-left text-xs text-gray-500 hover:text-gray-700"
+                  onClick={() => setEditingField('date')}
+                >
+                  Date: {new Date(project.date).toLocaleDateString('en-GB')}
+                </button>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-4 ml-4 relative">
-            {editingField === 'date' ? (
-              <Input
-                type="date"
-                value={project.date}
-                onChange={(e) => updateProject({ date: e.target.value })}
-                onBlur={() => setEditingField(null)}
-                className="h-8 text-sm bg-white text-gray-900"
-                autoFocus
-              />
-            ) : (
-              <span
-                className="text-sm cursor-pointer"
-                onClick={() => setEditingField('date')}
-              >
-                Date: {new Date(project.date).toLocaleDateString('en-GB')}
-              </span>
-            )}
+
+          <div className="flex items-center gap-1 sm:gap-2 relative shrink-0">
             <button
+              type="button"
               onClick={() => router.push('/')}
-              className="p-2 hover:bg-orange-600 rounded-lg"
+              className="p-2 rounded-md hover:bg-gray-100"
+              aria-label="Back"
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
@@ -402,7 +415,7 @@ export default function ProjectPage() {
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
-              className="p-2 hover:bg-orange-600 rounded-lg"
+              className="p-2 rounded-md hover:bg-gray-100"
               aria-label="Menu"
             >
               <MoreVertical className="w-5 h-5" />
@@ -550,7 +563,44 @@ export default function ProjectPage() {
                   const isRDRow = row.chainage?.startsWith('RD') || row.chainage?.includes('RD');
                   const isClosingBMRow = row.isClosingBM === true;
 
-                  return (
+                  const pattern = project.pointPattern && project.pointPattern.length
+                    ? project.pointPattern
+                    : ['3.5 LHS', 'CL', '3.5 RHS'];
+                  const clPos = pattern.findIndex((p) => {
+                    const t = p.trim().toUpperCase();
+                    return t === 'CL' || t.endsWith(' CL');
+                  });
+                  const extractStation = (text: string): string | null => {
+                    const m = text.match(/^\d+\+\d{3}/);
+                    return m ? m[0] : null;
+                  };
+                  const prevStation = (() => {
+                    for (let j = index - 1; j >= 0; j -= 1) {
+                      const s = extractStation(processedRows[j]?.chainage ?? '');
+                      if (s) return s;
+                    }
+                    return null;
+                  })();
+                  const groupCLRow = clPos >= 0 ? processedRows[index + clPos] : undefined;
+                  const groupStation = groupCLRow && groupCLRow.chainageType === 'CL'
+                    ? extractStation(groupCLRow.chainage ?? '')
+                    : null;
+                  const shouldInsertChainageSpacer =
+                    index > 1 &&
+                    !isFirstRow &&
+                    !isClosingBMRow &&
+                    !!groupStation &&
+                    !!prevStation &&
+                    groupStation !== prevStation;
+
+                  return [
+                    shouldInsertChainageSpacer ? (
+                      <tr key={`${row.id}-chainage-spacer`} className="border-0">
+                        <td colSpan={8} className="p-0">
+                          <div className="h-4 sm:h-6 print:h-4" />
+                        </td>
+                      </tr>
+                    ) : null,
                     <tr
                       key={row.id}
                       className={`border-b border-gray-200 hover:bg-gray-50 ${
@@ -913,12 +963,12 @@ export default function ProjectPage() {
                         )}
                       </td>
                       <td className="p-1 sm:p-2">
-                        <div className="px-1 sm:px-2 py-1 text-gray-700 h-10 sm:h-11 flex items-center text-xs sm:text-sm">
-                          {row.diff !== undefined ? row.diff.toFixed(3) : '—'}
+                        <div className="px-1 sm:px-2 py-1 text-gray-700 h-10 sm:h-11 flex items-center text-xs sm:text-sm font-mono whitespace-nowrap">
+                          {row.diff !== undefined && row.diff !== null ? row.diff.toFixed(3) : '—'}
                         </div>
                       </td>
-                    </tr>
-                  );
+                    </tr>,
+                  ];
                 })}
               </tbody>
             </table>
@@ -935,4 +985,3 @@ export default function ProjectPage() {
     </div>
   );
 }
-
