@@ -17,6 +17,12 @@ export const metadata: Metadata = {
   description: "Mobile-first leveling notebook for surveyors with automatic calculations",
   manifest: "/manifest.json",
   themeColor: "#000000",
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/icon.svg", type: "image/svg+xml" }],
+  },
   viewport: {
     width: "device-width",
     initialScale: 1,

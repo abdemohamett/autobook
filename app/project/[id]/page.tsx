@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef, type FocusEvent } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Project, Row } from '@/lib/types';
 import { getProject, saveProject, generateTableRows } from '@/lib/storage';
 import { processRows, addChangePoint, deleteChangePoint } from '@/lib/calculations';
-import { ArrowLeft, Trash2 } from 'lucide-react';
+import { ArrowLeft, Trash2, MoreVertical, Printer, Undo2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
@@ -21,6 +21,7 @@ export default function ProjectPage() {
   const [cpLabel, setCpLabel] = useState('');
   const [patternText, setPatternText] = useState('3.5 LHS, CL, 3.5 RHS');
   const [patternDialogOpen, setPatternDialogOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const [editingBMName, setEditingBMName] = useState(false);
   const [editingBMRL, setEditingBMRL] = useState(false);
   const [bmRLRawInput, setBmRLRawInput] = useState<string>('');
@@ -29,6 +30,9 @@ export default function ProjectPage() {
 
   // Use ref for debounce to avoid recreating
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const historyRef = useRef<Project[]>([]);
+  const isUndoingRef = useRef(false);
+  const lastHistoryTsRef = useRef(0);
 
   useEffect(() => {
     const loaded = getProject(projectId);
@@ -55,6 +59,17 @@ export default function ProjectPage() {
     }, 500);
   }, []);
 
+  const pushHistory = useCallback((snapshot: Project) => {
+    if (isUndoingRef.current) return;
+    const now = Date.now();
+    if (now - lastHistoryTsRef.current < 500) return;
+    lastHistoryTsRef.current = now;
+    historyRef.current.push(JSON.parse(JSON.stringify(snapshot)));
+    if (historyRef.current.length > 30) {
+      historyRef.current.shift();
+    }
+  }, []);
+
   // Memoize processed rows to avoid recalculating on every render
   const processedRows = useMemo(() => {
     if (!project || project.rows.length === 0) return [];
@@ -64,11 +79,12 @@ export default function ProjectPage() {
   const updateProject = useCallback((updates: Partial<Project>) => {
     setProject((prev) => {
       if (!prev) return prev;
+      pushHistory(prev);
       const updated = { ...prev, ...updates };
       saveProjectDebounced(updated);
       return updated;
     });
-  }, [saveProjectDebounced]);
+  }, [pushHistory, saveProjectDebounced]);
 
   useEffect(() => {
     if (!project) return;
@@ -99,6 +115,7 @@ export default function ProjectPage() {
   const updateRow = useCallback((rowId: string, updates: Partial<Row>) => {
     setProject((prev) => {
       if (!prev) return prev;
+      pushHistory(prev);
       const updatedRows = prev.rows.map((row) =>
         row.id === rowId ? { ...row, ...updates } : row
       );
@@ -106,14 +123,46 @@ export default function ProjectPage() {
       saveProjectDebounced(updated);
       return updated;
     });
+  }, [pushHistory, saveProjectDebounced]);
+
+  const handleNumericFocus = useCallback((e: FocusEvent<HTMLInputElement>) => {
+    const el = e.currentTarget;
+    const len = el.value?.length ?? 0;
+    try {
+      el.setSelectionRange(len, len);
+    } catch {
+      // no-op
+    }
+    requestAnimationFrame(() => {
+      el.scrollLeft = el.scrollWidth;
+    });
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    const prev = historyRef.current.pop();
+    if (!prev) return;
+    isUndoingRef.current = true;
+    setProject(prev);
+    saveProjectDebounced(prev);
+    if (prev.pointPattern && prev.pointPattern.length) {
+      setPatternText(prev.pointPattern.join(', '));
+    }
+    setTimeout(() => {
+      isUndoingRef.current = false;
+    }, 0);
   }, [saveProjectDebounced]);
+
+  const handlePrint = useCallback(() => {
+    setMenuOpen(false);
+    window.print();
+  }, []);
 
   // Helper to parse number allowing "0", ".", "0.", "3." etc (important for surveying)
   const parseSurveyNumber = useCallback((value: string): number | undefined => {
     if (value === '' || value === null || value === undefined) return undefined;
     // Allow intermediate states: ".", "0", "0.", "3.", etc - return undefined but allow typing
     // Check if it ends with just a dot (like "3." or "0.")
-    if (value === '.' || value.endsWith('.') && value.split('.').length === 2) {
+    if (value === '.' || (value.endsWith('.') && value.split('.').length === 2)) {
       // Check if the part before dot is a valid number
       const beforeDot = value.slice(0, -1);
       if (beforeDot === '' || /^-?\d+$/.test(beforeDot)) {
@@ -171,6 +220,8 @@ export default function ProjectPage() {
   const handleConfirmCP = () => {
     if (!project || cpRowIndex < 0 || !cpBS) return;
 
+    pushHistory(project);
+
     const newBS = parseFloat(cpBS);
     if (isNaN(newBS)) return;
 
@@ -208,6 +259,11 @@ export default function ProjectPage() {
     const cpRow = processedRows[cpRowIndex];
     if (!cpRow || !cpRow.isCP) return;
 
+    const confirmed = window.confirm('Are you sure you want to delete this change point?');
+    if (!confirmed) return;
+
+    pushHistory(project);
+
     // Find the index in the original rows array
     const originalIndex = project.rows.findIndex(r => r.id === cpRow.id);
     if (originalIndex === -1) return;
@@ -220,7 +276,7 @@ export default function ProjectPage() {
       saveProjectDebounced(updated);
       return updated;
     });
-  }, [project, processedRows, saveProjectDebounced]);
+  }, [project, processedRows, pushHistory, saveProjectDebounced]);
 
 
   // Use project title or generate from data
@@ -297,7 +353,7 @@ export default function ProjectPage() {
   return (
     <div className="min-h-screen bg-white">
       {/* Orange Header Bar */}
-      <header className="sticky top-0 z-20 bg-orange-500 text-white px-4 py-3">
+      <header className="sticky top-0 z-20 bg-orange-500 text-white px-4 py-3 no-print">
         <div className="flex items-center justify-between">
           <div className="flex-1">
             {editingField === 'title' ? (
@@ -318,15 +374,7 @@ export default function ProjectPage() {
               </h1>
             )}
           </div>
-          <div className="flex items-center gap-4 ml-4">
-            <Button
-              type="button"
-              onClick={() => setPatternDialogOpen(true)}
-              className="h-8 px-3 text-xs"
-              variant="secondary"
-            >
-              Pattern
-            </Button>
+          <div className="flex items-center gap-4 ml-4 relative">
             {editingField === 'date' ? (
               <Input
                 type="date"
@@ -350,6 +398,64 @@ export default function ProjectPage() {
             >
               <ArrowLeft className="w-5 h-5" />
             </button>
+
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="p-2 hover:bg-orange-600 rounded-lg"
+              aria-label="Menu"
+            >
+              <MoreVertical className="w-5 h-5" />
+            </button>
+
+            {menuOpen && (
+              <>
+                <button
+                  type="button"
+                  className="fixed inset-0 z-40"
+                  onClick={() => setMenuOpen(false)}
+                  aria-label="Close menu"
+                />
+                <div className="absolute right-0 top-10 z-50 w-56 rounded-md border border-gray-200 bg-white text-gray-900 shadow-lg overflow-hidden">
+                  <button
+                    type="button"
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setPatternDialogOpen(true);
+                    }}
+                  >
+                    <span className="inline-flex w-5 justify-center">
+                      <MoreVertical className="w-4 h-4 opacity-0" />
+                    </span>
+                    Pattern
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2"
+                    onClick={handlePrint}
+                  >
+                    <Printer className="w-4 h-4" />
+                    Print
+                  </button>
+                  <button
+                    type="button"
+                    className={`w-full px-3 py-2 text-left text-sm hover:bg-gray-50 flex items-center gap-2 ${
+                      historyRef.current.length === 0 ? 'opacity-50 cursor-not-allowed' : ''
+                    }`}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      if (historyRef.current.length === 0) return;
+                      handleUndo();
+                    }}
+                    disabled={historyRef.current.length === 0}
+                  >
+                    <Undo2 className="w-4 h-4" />
+                    Undo
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       </header>
@@ -357,7 +463,7 @@ export default function ProjectPage() {
       <main className="px-2 sm:px-4 py-4 sm:py-6">
         {patternDialogOpen && (
           <div
-            className="fixed inset-0 z-50 flex items-center justify-center"
+            className="fixed inset-0 z-50 flex items-center justify-center no-print"
             role="dialog"
             aria-modal="true"
           >
@@ -414,6 +520,11 @@ export default function ProjectPage() {
           Saved locally ✓
         </div>
 
+        <div className="hidden print:block mb-3">
+          <div className="text-base font-semibold text-gray-900">{headerTitle}</div>
+          <div className="text-xs text-gray-600">Date: {new Date(project.date).toLocaleDateString('en-GB')}</div>
+        </div>
+
         {/* Table - Mobile Optimized */}
         {hasRows && (
           <div className="overflow-x-auto -mx-2 sm:-mx-4 px-2 sm:px-4">
@@ -459,7 +570,8 @@ export default function ProjectPage() {
                             if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                             setCpBS(val);
                           }}
-                          className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-blue-50 border-blue-300 placeholder:text-gray-400 focus:bg-white focus:border-blue-400 text-right font-mono whitespace-nowrap"
+                          onFocus={handleNumericFocus}
+                          className="w-full h-10 sm:h-11 text-[11px] sm:text-sm min-h-[44px] bg-blue-50 border-blue-300 placeholder:text-gray-400 focus:bg-white focus:border-blue-400 text-right font-mono tabular-nums tracking-tight whitespace-nowrap px-1 sm:px-2"
                             placeholder="New BS"
                           />
                         ) : (
@@ -478,8 +590,9 @@ export default function ProjectPage() {
                                 updateInputValue(row.id, 'bs', val);
                               }
                             }}
+                            onFocus={handleNumericFocus}
                             disabled={isClosingBMRow}
-                            className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono whitespace-nowrap"
+                            className="w-full h-10 sm:h-11 text-[11px] sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono tabular-nums tracking-tight whitespace-nowrap px-1 sm:px-2"
                             placeholder=""
                           />
                         )}
@@ -495,8 +608,9 @@ export default function ProjectPage() {
                               if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                               updateInputValue(row.id, 'is', val);
                             }}
+                          onFocus={handleNumericFocus}
                           disabled={isClosingBMRow}
-                          className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono whitespace-nowrap"
+                          className="w-full h-10 sm:h-11 text-[11px] sm:text-sm min-h-[44px] bg-gray-50 border-gray-200 placeholder:text-gray-400 focus:bg-white focus:border-gray-400 text-right font-mono tabular-nums tracking-tight whitespace-nowrap px-1 sm:px-2"
                           placeholder=""
                         />
                       </td>
@@ -513,12 +627,13 @@ export default function ProjectPage() {
                                 if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                                 updateInputValue(row.id, 'fs', val);
                               }}
-                              className={`flex-1 h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] ${
+                              onFocus={handleNumericFocus}
+                              className={`flex-1 h-10 sm:h-11 text-[11px] sm:text-sm min-h-[44px] ${
                                 isClosingBMRow ? 'bg-yellow-50 border-yellow-300 focus:border-yellow-400' : 'bg-gray-50 border-gray-200 focus:border-gray-400'
-                              } placeholder:text-gray-400 focus:bg-white text-right font-mono whitespace-nowrap`}
+                              } placeholder:text-gray-400 focus:bg-white text-right font-mono tabular-nums tracking-tight whitespace-nowrap px-1 sm:px-2`}
                               placeholder={isClosingBMRow ? 'Closing FS' : ''}
                             />
-                            {row.fs !== undefined && row.fs !== null && !isCPRow && !isClosingBMRow && (
+                            {row.fs !== undefined && row.fs !== null && !isCPRow && !isClosingBMRow && !row.isCP && (
                               <Button
                                 type="button"
                                 variant="outline"
@@ -671,7 +786,8 @@ export default function ProjectPage() {
                                   setBmRLRawInput('');
                                 }
                               }}
-                              className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-blue-50 border-blue-300 focus:bg-white focus:border-blue-400"
+                              onClick={(e) => handleNumericFocus(e as unknown as FocusEvent<HTMLInputElement>)}
+                              className="w-full h-10 sm:h-11 text-[11px] sm:text-sm min-h-[44px] bg-blue-50 border-blue-300 focus:bg-white focus:border-blue-400 font-mono tabular-nums tracking-tight px-1 sm:px-2"
                               placeholder=""
                               autoFocus
                             />
@@ -711,9 +827,10 @@ export default function ProjectPage() {
                             if (val !== '' && !/^-?\d*\.?\d*$/.test(val)) return;
                             updateInputValue(row.id, 'd', val);
                           }}
-                          className={`w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] ${
+                          onFocus={handleNumericFocus}
+                          className={`w-full h-10 sm:h-11 text-[11px] sm:text-sm min-h-[44px] ${
                             isClosingBMRow ? 'bg-yellow-50 border-yellow-300 focus:border-yellow-400' : 'bg-gray-50 border-gray-200 focus:border-gray-400'
-                          } placeholder:text-gray-400 focus:bg-white text-right font-mono whitespace-nowrap`}
+                          } placeholder:text-gray-400 focus:bg-white text-right font-mono tabular-nums tracking-tight whitespace-nowrap px-1 sm:px-2`}
                           placeholder={isClosingBMRow ? 'BM RL' : ''}
                         />
                       </td>
@@ -766,7 +883,7 @@ export default function ProjectPage() {
                             type="text"
                             value={row.chainage || ''}
                             onChange={(e) => updateRow(row.id, { chainage: e.target.value })}
-                            className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-yellow-50 border-yellow-300 focus:bg-white"
+                            className="w-full h-10 sm:h-11 text-xs sm:text-sm min-h-[44px] bg-yellow-50 border-yellow-300 focus:bg-white px-1 sm:px-2"
                             placeholder="Closing BM name"
                           />
                         ) : isCPDataRow ? (
@@ -818,3 +935,4 @@ export default function ProjectPage() {
     </div>
   );
 }
+
