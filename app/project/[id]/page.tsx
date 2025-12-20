@@ -175,13 +175,18 @@ export default function ProjectPage() {
 
   // Get display value for input (shows raw input or stored number)
   // Always prefer raw input if it exists (allows "00", "000", etc.)
-  const getInputValue = useCallback((rowId: string, field: 'bs' | 'is' | 'fs' | 'd', storedValue?: number): string => {
+  const getInputValue = useCallback((rowId: string, field: 'bs' | 'is' | 'fs' | 'd', storedValue?: number, storedText?: string): string => {
     const key = `${rowId}-${field}`;
     // Always show raw input if it exists (preserves "00", "000", etc.)
     if (rawInputs[key] !== undefined && rawInputs[key] !== '') {
       return rawInputs[key];
     }
-    return storedValue !== undefined && storedValue !== null ? String(storedValue) : '';
+    // If we have a persisted text value, prefer it (preserves trailing zeros like 1.400)
+    if (storedText !== undefined && storedText !== null && storedText !== '') {
+      return storedText;
+    }
+    // Fallback: format to 3 decimals for readability (common surveying format)
+    return storedValue !== undefined && storedValue !== null ? storedValue.toFixed(3) : '';
   }, [rawInputs]);
 
   // Update input value (stores raw string and parsed number)
@@ -194,10 +199,12 @@ export default function ProjectPage() {
     // Parse and update row in background (but keep raw input for display)
     const parsed = parseSurveyNumber(value);
     if (parsed !== undefined) {
-      updateRow(rowId, { [field]: parsed });
+      const textField = `${field}Text` as 'bsText' | 'isText' | 'fsText' | 'dText';
+      updateRow(rowId, { [field]: parsed, [textField]: value } as Partial<Row>);
     } else if (value === '') {
       // Clear stored value when empty
-      updateRow(rowId, { [field]: undefined });
+      const textField = `${field}Text` as 'bsText' | 'isText' | 'fsText' | 'dText';
+      updateRow(rowId, { [field]: undefined, [textField]: undefined } as Partial<Row>);
       setRawInputs(prev => {
         const next = { ...prev };
         delete next[key];
@@ -628,7 +635,7 @@ export default function ProjectPage() {
                           <Input
                             type="text"
                             inputMode="decimal"
-                            value={getInputValue(row.id, 'bs', row.bs)}
+                            value={getInputValue(row.id, 'bs', row.bs, row.bsText)}
                             onChange={(e) => {
                               const val = e.target.value;
                               // Allow any numeric pattern: 00, 000, 0.00, etc. - be very flexible
@@ -651,7 +658,7 @@ export default function ProjectPage() {
                         <Input
                           type="text"
                           inputMode="decimal"
-                          value={getInputValue(row.id, 'is', row.is)}
+                          value={getInputValue(row.id, 'is', row.is, row.isText)}
                             onChange={(e) => {
                               const val = e.target.value;
                               // Allow any numeric pattern: 00, 000, 0.00, etc. - be very flexible
@@ -670,7 +677,7 @@ export default function ProjectPage() {
                             <Input
                               type="text"
                               inputMode="decimal"
-                              value={getInputValue(row.id, 'fs', row.fs)}
+                              value={getInputValue(row.id, 'fs', row.fs, row.fsText)}
                               onChange={(e) => {
                                 const val = e.target.value;
                                 // Allow any numeric pattern: 00, 000, 0.00, etc. - be very flexible
@@ -870,7 +877,7 @@ export default function ProjectPage() {
                         <Input
                           type="text"
                           inputMode="decimal"
-                          value={getInputValue(row.id, 'd', row.d)}
+                          value={getInputValue(row.id, 'd', row.d, row.dText)}
                           onChange={(e) => {
                             const val = e.target.value;
                             // Allow any numeric pattern: 00, 000, 0.00, etc. - be very flexible

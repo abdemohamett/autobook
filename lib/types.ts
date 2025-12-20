@@ -10,11 +10,15 @@ export interface Row {
   chainage: string; // Display name for chainage point (e.g. "2+460 CL", "3.5 LHS", "RD4B-14A")
   chainageType?: 'CL' | 'RD' | 'LHS' | 'RHS'; // For styling (CL=green, RD=red)
   bs?: number; // Backsight
+  bsText?: string;
   is?: number; // Intermediate sight
+  isText?: string;
   fs?: number; // Foresight
+  fsText?: string;
   hoc?: number; // Height of Collimation
   rl?: number; // Reduced Level (Achieved RL)
   d?: number; // Design RL
+  dText?: string;
   diff?: number; // Difference (D - RL)
   isCP?: boolean; // Is this a Change Point divider?
   cpLabel?: string; // CP label (e.g. "CP01")
