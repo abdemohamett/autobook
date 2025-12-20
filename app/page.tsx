@@ -4,14 +4,16 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Project } from '@/lib/types';
 import { getAllProjects, deleteProject, createProject } from '@/lib/storage';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, Droplet } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { parseChainage, formatChainage } from '@/lib/chainage';
 
 export default function ProjectsPage() {
   const router = useRouter();
   const [projects, setProjects] = useState<Project[]>(() => getAllProjects());
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showDippingModal, setShowDippingModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState<string | null>(null);
 
   const handleCreateProject = (e: React.FormEvent<HTMLFormElement>) => {
@@ -35,6 +37,45 @@ export default function ProjectsPage() {
     const project = createProject(title, layer, fromChainage, toChainage, chainageInterval, pointsPerChainage);
     setProjects(getAllProjects());
     setShowCreateModal(false);
+    router.push(`/project/${project.id}`);
+  };
+
+  const handleCreateDippingProject = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const formData = new FormData(e.currentTarget);
+
+    let title = formData.get('title') as string;
+    const layer = formData.get('layer') as string;
+    const fromChainage = formData.get('fromChainage') as string;
+    const chainageInterval = parseInt(formData.get('chainageInterval') as string) || 20;
+    const numberOfChainages = parseInt(formData.get('numberOfChainages') as string) || 1;
+
+    if (!layer || !fromChainage) return;
+    if (!Number.isFinite(chainageInterval) || chainageInterval <= 0) return;
+    if (!Number.isFinite(numberOfChainages) || numberOfChainages <= 0) return;
+
+    const fromM = parseChainage(fromChainage);
+    const toM = fromM + Math.max(0, numberOfChainages - 1) * chainageInterval;
+    const toChainage = formatChainage(toM);
+
+    // Generate default title if not provided
+    if (!title || title.trim() === '') {
+      title = `DIPPING FROM ${fromChainage} TO ${toChainage} FOR ${layer.toUpperCase()}`;
+    }
+
+    // Dipping: only one point per chainage (CL)
+    const project = createProject(
+      title,
+      layer,
+      fromChainage,
+      toChainage,
+      chainageInterval,
+      1,
+      ['CL']
+    );
+
+    setProjects(getAllProjects());
+    setShowDippingModal(false);
     router.push(`/project/${project.id}`);
   };
 
@@ -64,13 +105,24 @@ export default function ProjectsPage() {
         {projects.length === 0 ? (
           <div className="text-center py-12">
             <p className="text-gray-500 mb-4">No projects yet</p>
-            <Button
-              onClick={() => setShowCreateModal(true)}
-              className="inline-flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Create Project
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center">
+              <Button
+                onClick={() => setShowCreateModal(true)}
+                className="inline-flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Create Project
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowDippingModal(true)}
+                className="inline-flex items-center gap-2"
+              >
+                <Droplet className="w-4 h-4" />
+                Dipping
+              </Button>
+            </div>
           </div>
         ) : (
           <div className="space-y-3">
@@ -121,12 +173,24 @@ export default function ProjectsPage() {
 
         {/* Create Button */}
         {projects.length > 0 && (
-          <button
-            onClick={() => setShowCreateModal(true)}
-            className="fixed bottom-6 right-6 w-14 h-14 bg-black text-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-800 transition-colors"
-          >
-            <Plus className="w-6 h-6" />
-          </button>
+          <div className="fixed bottom-6 right-6 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setShowDippingModal(true)}
+              className="w-14 h-14 bg-white text-gray-900 border border-gray-200 rounded-full shadow-lg flex items-center justify-center hover:bg-gray-50 transition-colors"
+              aria-label="Create Dipping Project"
+            >
+              <Droplet className="w-6 h-6" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(true)}
+              className="w-14 h-14 bg-black text-white rounded-full shadow-lg flex items-center justify-center hover:bg-gray-800 transition-colors"
+              aria-label="Create Project"
+            >
+              <Plus className="w-6 h-6" />
+            </button>
+          </div>
         )}
       </main>
 
@@ -213,6 +277,103 @@ export default function ProjectsPage() {
                   type="button"
                   variant="outline"
                   onClick={() => setShowCreateModal(false)}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  className="flex-1"
+                >
+                  Create
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Dipping Modal */}
+      {showDippingModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-lg w-full max-w-md p-6">
+            <h2 className="text-xl font-semibold mb-4">Create Dipping</h2>
+            <form onSubmit={handleCreateDippingProject} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Project Title (optional - auto-generated if empty)
+                </label>
+                <Input
+                  type="text"
+                  name="title"
+                  placeholder="e.g. DIPPING FROM 0+000 TO 0+200 FOR SUBGRADE"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Layer
+                </label>
+                <Input
+                  type="text"
+                  name="layer"
+                  required
+                  placeholder="e.g. Bottom Bed"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    From Chainage
+                  </label>
+                  <Input
+                    type="text"
+                    name="fromChainage"
+                    required
+                    placeholder="0+000"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Number of Chainages
+                  </label>
+                  <Input
+                    type="number"
+                    name="numberOfChainages"
+                    defaultValue={10}
+                    min={1}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Chainage Interval
+                  </label>
+                  <Input
+                    type="number"
+                    name="chainageInterval"
+                    defaultValue={20}
+                    min={1}
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Points per Chainage
+                  </label>
+                  <Input
+                    type="number"
+                    value={1}
+                    disabled
+                  />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowDippingModal(false)}
                   className="flex-1"
                 >
                   Cancel

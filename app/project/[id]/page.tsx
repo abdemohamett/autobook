@@ -357,6 +357,11 @@ export default function ProjectPage() {
 
   const hasRows = project.rows.length > 0;
 
+  const isDippingProject =
+    project.pointsPerChainage === 1 &&
+    ((project.pointPattern?.length === 1 && project.pointPattern[0]?.trim().toUpperCase() === 'CL') ||
+      (!project.pointPattern || project.pointPattern.length === 0));
+
   return (
     <div className="min-h-screen bg-white">
       {/* Orange Header Bar */}
@@ -558,7 +563,7 @@ export default function ProjectPage() {
                   <th className="text-left p-1.5 sm:p-2 font-semibold text-gray-700 min-w-[80px] sm:min-w-[80px] text-[10px] sm:text-xs">RL</th>
                   <th className="text-left p-1.5 sm:p-2 font-semibold text-gray-700 min-w-[70px] sm:min-w-[70px] text-[10px] sm:text-xs">D</th>
                   <th className="text-left p-1.5 sm:p-2 font-semibold text-gray-700 min-w-[100px] sm:min-w-[100px] text-[10px] sm:text-xs">CH</th>
-                  <th className="text-left p-1.5 sm:p-2 font-semibold text-gray-700 min-w-[70px] sm:min-w-[70px] text-[10px] sm:text-xs">DIFF</th>
+                  <th className="text-left p-1.5 sm:p-2 font-semibold text-gray-700 min-w-[70px] sm:min-w-[70px] text-[10px] sm:text-xs">{isDippingProject ? 'MARK' : 'DIFF'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -971,7 +976,16 @@ export default function ProjectPage() {
                       </td>
                       <td className="p-1 sm:p-2">
                         <div className="px-1 sm:px-2 py-1 text-gray-700 h-10 sm:h-11 flex items-center text-xs sm:text-sm font-mono whitespace-nowrap">
-                          {row.diff !== undefined && row.diff !== null ? row.diff.toFixed(3) : '—'}
+                          {(() => {
+                            if (isDippingProject) {
+                              if (isFirstRow || isCPRow || isCPDataRow || isClosingBMRow) return '—';
+                              if (row.hoc === undefined || row.hoc === null) return '—';
+                              if (row.d === undefined || row.d === null) return '—';
+                              const mark = row.hoc - row.d - 0.3;
+                              return mark.toFixed(3);
+                            }
+                            return row.diff !== undefined && row.diff !== null ? row.diff.toFixed(3) : '—';
+                          })()}
                         </div>
                       </td>
                     </tr>,
